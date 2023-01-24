@@ -1,17 +1,11 @@
 import base64
 import io
-import math
 import os
-import pathlib
-import sys
-from os.path import exists
 import eventlet
 import socketio
 from PIL import Image
 import cv2
 import numpy as np
-import time
-import socket
 import json
 import warnings
 warnings.simplefilter("ignore", DeprecationWarning)
@@ -22,8 +16,10 @@ app = socketio.WSGIApp(sio, static_files={
     '/': {'content_type': 'text/html', 'filename': 'index.html'}
 })
 
+human = []
+
 # environ : http 헤더를 포함한 http 리퀘스트 데이터를 담는 WSGI 표준 딕셔너리
-#클라가 연결할 때 event를 보냄
+# 클라가 연결할 때 event를 보냄
 @sio.event
 def connect(sid, environ):
     print('connect ', sid)
@@ -35,7 +31,6 @@ def connect(sid, environ):
 def getBlurImg(sid, now, human_list, pixel_size=20):
     # Json 문자열을 Python 객체로 변환
     human_list = json.loads(human_list)
-    human = []
 
     # 원본 이미지를 불러옴
     natImage = Image.open(now + '/natural.jpg')
@@ -52,12 +47,17 @@ def getBlurImg(sid, now, human_list, pixel_size=20):
         print('index not selected')
     # 인덱스 값이 있다면 해당 얼굴 모자이크 처리 후 반환
     else:
+        print(human_list)
+        print(human)
         for i in human_list:
+            print(i)
             rate = int((human[i][2] - human[i][0] + human[i][3] - human[i][1]) / pixel_size)
             # 탐지된 객체의 크기의 가로 길이와 세로 길이를 합한 값을 사용해서 비율을 구함
             face_img = frame[human[i][1]:human[i][3], human[i][0]:human[i][2]]  # 탐지된 얼굴 이미지 crop
-            face_img = cv2.resize(face_img, ((human[i][2] - human[i][0]) // rate, (human[i][3] - human[i][1]) // rate))  # rate 만큼 축소
-            face_img = cv2.resize(face_img, (human[i][2] - human[i][0], human[i][3] - human[i][1]), interpolation=cv2.INTER_AREA)  # 확대
+            face_img = cv2.resize(face_img, (
+            (human[i][2] - human[i][0]) // rate, (human[i][3] - human[i][1]) // rate))  # rate 만큼 축소
+            face_img = cv2.resize(face_img, (human[i][2] - human[i][0], human[i][3] - human[i][1]),
+                                  interpolation=cv2.INTER_AREA)  # 확대
             frame[human[i][1]:human[i][3], human[i][0]:human[i][2]] = face_img  # 탐지된 얼굴 영역 모자이크 처리
         # Numpy 배열로 되어있는 이미지 배열을 PIL 이미지로 변환
         result_blue = Image.fromarray(frame)
@@ -69,14 +69,14 @@ def getBlurImg(sid, now, human_list, pixel_size=20):
         result_img.save(bt, format="PNG")
         im_bytes = bt.getvalue()
         res64 = base64.b64encode(im_bytes).decode('utf-8')
-        sio.emit('get_blur', {"image" : res64})
+        sio.emit('get_blur', {"image": res64})
         result_img.show()
         print('blur completed')
+
 
 # now : 원본 이미지 저장 시간
 # image : 원본 이미지
 # reliability : 신뢰도
-
 @sio.event()
 def detectFace(sid, now, image=None, reliability=0.3):
     # 객체 인식 모델
@@ -85,7 +85,7 @@ def detectFace(sid, now, image=None, reliability=0.3):
     config = 'opencv_face_detector.pbtxt'
 
     face_list = []
-    #readNet() 함수는 model과 config 파일 이름 확장자를 분석하여
+    # readNet() 함수는 model과 config 파일 이름 확장자를 분석하여
     # 내부에서 해당 프레임워크에 맞는 readNetFromXXX() 형태의 함수를 다시 호출
     # 여기선 .pb -> readNetFromTensorflow()
     net = cv2.dnn.readNet(model, config)
@@ -101,7 +101,7 @@ def detectFace(sid, now, image=None, reliability=0.3):
         cvtImg = Image.open(dataBytesIO)
         naturalImg = cv2.cvtColor(np.array(cvtImg), cv2.COLOR_BGR2RGB)
 
-        #now 변수를 이름으로 하는 폴더에 원본이미지 natural.jpg 라는 이름으로 저장
+        # now 변수를 이름으로 하는 폴더에 원본이미지 natural.jpg 라는 이름으로 저장
         cv2.imwrite(now + '/natural.jpg', np.array(naturalImg))
 
     # 원본 이미지를 불러옴
@@ -124,6 +124,7 @@ def detectFace(sid, now, image=None, reliability=0.3):
         y1 = int(detect[i, 4] * h)
         x2 = int(detect[i, 5] * w)
         y2 = int(detect[i, 6] * h)
+        human.append([x1, y1, x2, y2])
         face_img = frame[y1:y2, x1:x2]
         face_list.append(face_img)
 
@@ -148,5 +149,5 @@ def detectFace(sid, now, image=None, reliability=0.3):
 def disconnect(sid):
     print('disconnect ', sid)
 
-# if __name__ == '__main__':
-#     eventlet.wsgi.server(eventlet.listen(("ip address", port num)), app)
+if __name__ == '__main__':
+    eventlet.wsgi.server(eventlet.listen(("192.168.0.2", 8080)), app)
